@@ -164,7 +164,7 @@ echo "☑️ All services started."
 # --- Initial User Creation ---
 echo "⏳ Creating initial user..."
 sleep 2
-if docker compose exec cloud_storage_backend /app/createuser -username "$INIT_USERNAME" -name "$INIT_NAME" -password "$INIT_PASSWORD"; then
+if docker exec cloud_storage_backend /app/createuser -username "$INIT_USERNAME" -name "$INIT_NAME" -password "$INIT_PASSWORD"; then
   echo "✅ User '$INIT_USERNAME' created."
 else
   echo "❌ Failed to create initial user."
@@ -181,3 +181,15 @@ echo "🪪 Name:         $INIT_NAME"
 echo "🔐 Password:     $INIT_PASSWORD"
 echo "-----------------------------"
 echo "🌐 Your TMA CLOUD is running at: http://${SERVER_IP}:${FRONTEND_PORT}"
+echo ""
+
+echo "📌 Common User Management Commands:"
+echo ""
+echo "🔹 Create a new user:"
+echo "    docker exec cloud_storage_backend /app/createuser"
+echo ""
+echo "🔹 Delete a user:"
+echo "    docker exec cloud_storage_backend /app/deleteuser"
+echo ""
+echo "🔹 List all users:"
+echo "    docker exec cloud_storage_backend /app/showusers"

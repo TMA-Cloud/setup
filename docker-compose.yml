@@ -1,0 +1,187 @@
+---
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres_db
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER}", "-d", "${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:latest
+    container_name: redis_server
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command: >
+      redis-server
+      --appendonly yes
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  meilisearch:
+    image: getmeili/meilisearch:latest
+    container_name: meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_API_KEY}
+      MEILI_ENV: production
+      TZ: ${TZ}
+    volumes:
+      - meili_data:/meili_data
+    ports:
+      - "7700:7700"
+    networks:
+      - backend
+
+  documentserver:
+    image: onlyoffice/documentserver
+    container_name: onlyoffice_documentserver
+    restart: unless-stopped
+    environment:
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET}
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+      - onlyoffice_lib:/var/lib/onlyoffice
+      - onlyoffice_db:/var/lib/postgresql
+    ports:
+      - "8181:80"
+    networks:
+      - backend
+
+  cloud_storage_backend:
+    image: ghcr.io/tma-cloud/cloud_storage-backend:latest
+    container_name: cloud_storage_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+      UPLOAD_DIR: /upload
+      THUMB_DIR: /thumb
+    volumes:
+      - ${UPLOAD_DIR}:/upload
+      - ${THUMB_DIR}:/thumb
+    ports:
+      - "${BACKEND_PORT}:8080"
+    user: "${UID:-1000}:${GID:-1000}"
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
+      documentserver:
+        condition: service_started
+
+  cloud_storage_backend_healthcheck:
+    image: curlimages/curl:latest
+    container_name: backend_healthcheck
+    command: >
+      sh -c "
+        echo 'Waiting for cloud_storage_backend to become healthy...';
+        until curl -sf http://cloud_storage_backend:8080/health; do
+          echo 'Healthcheck failed, retrying in 2s...';
+          sleep 2;
+        done;
+        echo 'Backend is healthy.';
+      "
+    depends_on:
+      - cloud_storage_backend
+    networks:
+      - backend
+    restart: "no"
+
+  meilisearch_healthcheck:
+    image: curlimages/curl:latest
+    container_name: meilisearch_healthcheck
+    command: >
+      sh -c "
+        echo 'Checking Meilisearch health...';
+        until curl -sf http://meilisearch:7700/health; do
+          echo 'Waiting for Meilisearch...';
+          sleep 2;
+        done;
+        echo 'Meilisearch is healthy.';
+      "
+    depends_on:
+      - meilisearch
+    networks:
+      - backend
+    restart: "no"
+
+  documentserver_healthcheck:
+    image: curlimages/curl:latest
+    container_name: documentserver_healthcheck
+    command: >
+      sh -c "
+        echo 'Checking DocumentServer health...';
+        until curl -sf http://documentserver/healthcheck; do
+          echo 'Waiting for DocumentServer...';
+          sleep 2;
+        done;
+        echo 'DocumentServer is healthy.';
+      "
+    depends_on:
+      - documentserver
+    networks:
+      - backend
+    restart: "no"
+
+  cloud_storage_frontend:
+    image: ghcr.io/tma-cloud/cloud_storage-frontend:latest
+    container_name: cloud_storage_frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: ${TZ}
+    ports:
+      - "${FRONTEND_PORT}:3000"
+    networks:
+      - backend
+    depends_on:
+      cloud_storage_backend_healthcheck:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  redis_data:
+  meili_data:
+  onlyoffice_data:
+  onlyoffice_logs:
+  onlyoffice_lib:
+  onlyoffice_db:
+
+networks:
+  backend:
+    driver: bridge
